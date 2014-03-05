@@ -1,7 +1,7 @@
-from json_import import simplejson
+from .json_import import simplejson
 from urllib import parse
-from httplib2 import Http
 import mimetypes
+import requests
 
 
 class OAuth2AuthExchangeError(Exception):
@@ -86,12 +86,13 @@ class OAuth2AuthExchangeRequest(object):
                 client_params.update(scope=' '.join(scope))
         elif user_id:
             client_params.update(user_id=user_id)
-        return parse.urlencode(client_params)
+        return client_params
 
     def get_authorize_url(self, scope=None):
         return self._url_for_authorize(scope=scope)
 
     def get_authorize_login_url(self, scope=None):
+        # TODO: I don't think this will be useful, should scrap it
         http_object = Http(disable_ssl_certificate_validation=True)
 
         url = self._url_for_authorize(scope=scope)
@@ -103,13 +104,12 @@ class OAuth2AuthExchangeRequest(object):
 
     def exchange_for_access_token(self, code=None, username=None, password=None, scope=None, user_id=None):
         data = self._data_for_exchange(code, username, password, scope=scope, user_id=user_id)
-        http_object = Http(disable_ssl_certificate_validation=True)
         url = self.api.access_token_url
-        response, content = http_object.request(url, method="POST", body=data)
-        parsed_content = simplejson.loads(content)
-        if int(response['status']) != 200:
-            raise OAuth2AuthExchangeError(parsed_content.get("error_message", ""))
-        return parsed_content['access_token'], parsed_content['user']
+        response = requests.post(url, data=data)
+        parsed_content = response.json()
+        if int(response.status_code) != 200:
+            raise OAuth2AuthExchangeError(parsed_content.get("error_description", ""))
+        return parsed_content['access_token']
 
 
 class OAuth2Request(object):
@@ -149,7 +149,8 @@ class OAuth2Request(object):
             return base
 
     def _post_body(self, params):
-        return parse.urlencode(params)
+        # keep this from urlencoding
+        return params
 
     def _encode_multipart(params, files):
         boundary = "MuL7Ip4rt80uND4rYF0o"
@@ -186,26 +187,20 @@ class OAuth2Request(object):
         url, method, body, headers = self.prepare_request(method, path, params, include_secret)
         return self.make_request(url, method, body, headers)
 
-    def prepare_request(self, method, path, params, include_secret=False):
+    def prepare_request(self, method, path, params, accepts_file=False, include_secret=False):
         url = body = None
         headers = {}
 
-        if not params.get('files'):
-            if method == "POST":
-                body = self._post_body(params)
-                headers = {'Content-type': 'application/x-www-form-urlencoded'}
-                url = self._full_url(path, include_secret)
-            else:
-                url = self._full_url_with_params(path, params, include_secret)
+        if method == "POST":
+            body = self._post_body(params)
+            url = self._full_url(path, include_secret)
         else:
-            body, headers = self._encode_multipart(params, params['files'])
-            url = self._full_url(path)
+            url = self._full_url_with_params(path, params, include_secret)
 
         return url, method, body, headers
 
-    def make_request(self, url, method="GET", body=None, headers=None):
+    def make_request(self, url, method="GET", body=None, headers=None, files=None):
         headers = headers or {}
         if not 'User-Agent' in headers:
             headers.update({"User-Agent": "%s Python Client" % self.api.api_name})
-        http_obj = Http(disable_ssl_certificate_validation=True)
-        return http_obj.request(url, method, body=body, headers=headers)
+        return requests.request(method, url, data=body, headers=headers, files=files)

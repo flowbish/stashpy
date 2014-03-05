@@ -1,17 +1,16 @@
+from .oauth2 import OAuth2Request
+from .json_import import simplejson
 import urllib
-from oauth2 import OAuth2Request
 import re
-from json_import import simplejson
 
 re_path_template = re.compile('{\w+}')
 
 
 def encode_string(value):
-    return value.encode('utf-8') \
-                        if isinstance(value, unicode) else str(value)
+    return str(value)
 
 
-class InstagramClientError(Exception):
+class StashClientError(Exception):
     def __init__(self, error_message):
         self.error_message = error_message
 
@@ -19,7 +18,7 @@ class InstagramClientError(Exception):
         return self.error_message
 
 
-class InstagramAPIError(Exception):
+class StashAPIError(Exception):
 
     def __init__(self, status_code, error_type, error_message, *args, **kwargs):
         self.status_code = status_code
@@ -32,7 +31,7 @@ class InstagramAPIError(Exception):
 
 def bind_method(**config):
 
-    class InstagramAPIMethod(object):
+    class StashAPIMethod(object):
 
         path = config['path']
         method = config.get('method', 'GET')
@@ -40,6 +39,7 @@ def bind_method(**config):
         requires_target_user = config.get('requires_target_user', False)
         paginates = config.get('paginates', False)
         root_class = config.get('root_class', None)
+        accepts_file = config.get('accepts_file', False)
         response_type = config.get("response_type", "list")
         include_secret = config.get("include_secret", False)
         objectify_response = config.get("objectify_response", True)
@@ -50,6 +50,7 @@ def bind_method(**config):
             self.return_json = kwargs.pop("return_json", False)
             self.max_pages = kwargs.pop("max_pages", 3)
             self.parameters = {}
+            self.file = None
             self._build_parameters(args, kwargs)
             self._build_path()
 
@@ -62,13 +63,19 @@ def bind_method(**config):
                 try:
                     self.parameters[self.accepts_parameters[index]] = encode_string(value)
                 except IndexError:
-                    raise InstagramClientError("Too many arguments supplied")
+                    raise StashClientError("Too many arguments supplied")
 
-            for key, value in kwargs.iteritems():
+            for key, value in kwargs.items():
                 if value is None:
                     continue
                 if key in self.parameters:
-                    raise InstagramClientError("Parameter %s already supplied" % key)
+                    raise StashClientError("Parameter %s already supplied" % key)
+                if key == 'file':
+                    if self.accepts_file:
+                        self.file = {'file' : value}
+                    else:
+                        raise StashClientError("Method does not support files")
+                    continue
                 self.parameters[key] = encode_string(value)
             if 'user_id' in self.accepts_parameters and not 'user_id' in self.parameters \
                and not self.requires_target_user:
@@ -85,25 +92,26 @@ def bind_method(**config):
                 del self.parameters[name]
 
                 self.path = self.path.replace(variable, value)
-            self.path = self.path + '.%s' % self.api.format
+            self.path = self.path
 
-        def _do_api_request(self, url, method="GET", body=None, headers=None):
+        def _do_api_request(self, url, method="GET", body=None, headers=None, files=None):
             headers = headers or {}
-            response, content = OAuth2Request(self.api).make_request(url, method=method, body=body, headers=headers)
-            if response['status'] == '503':
-                raise InstagramAPIError(response['status'], "Rate limited", "Your client is making too many request per second")
+            response = OAuth2Request(self.api).make_request(url, method=method, body=body, headers=headers, files=files)
+            if response.status_code == 503:
+                raise StashAPIError(response.status_code, "Rate limited", "Your client is making too many request per second")
 
             try:
-                content_obj = simplejson.loads(content)
+                content_obj = response.json()
             except ValueError:
-                raise InstagramClientError('Unable to parse response, not valid JSON.')
+                raise StashClientError('Unable to parse response, not valid JSON.')
 
             api_responses = []
-            status_code = content_obj['meta']['code']
+            status_code = response.status_code
             if status_code == 200:
                 if not self.objectify_response:
                     return content_obj, None
 
+                # TODO: this doesn't work at all
                 if self.response_type == 'list':
                     for entry in content_obj['data']:
                         if self.return_json:
@@ -121,7 +129,7 @@ def bind_method(**config):
                     pass
                 return api_responses, content_obj.get('pagination', {}).get('next_url')
             else:
-                raise InstagramAPIError(status_code, content_obj['meta']['error_type'], content_obj['meta']['error_message'])
+                raise StashAPIError(status_code, content_obj['error'], content_obj['error_description'])
 
         def _paginator_with_url(self, url, method="GET", body=None, headers=None):
             headers = headers or {}
@@ -134,20 +142,18 @@ def bind_method(**config):
 
         def execute(self):
             url, method, body, headers = OAuth2Request(self.api).prepare_request(self.method,
-                                                                                 self.path,
-                                                                                 self.parameters,
-                                                                                 include_secret=self.include_secret)
+                    self.path, self.parameters, accepts_file=self.accepts_file, include_secret=self.include_secret)
             if self.as_generator:
                 return self._paginator_with_url(url, method, body, headers)
             else:
-                content, next = self._do_api_request(url, method, body, headers)
+                content, next = self._do_api_request(url, method, body, headers, self.file)
             if self.paginates:
                 return content, next
             else:
                 return content
 
     def _call(api, *args, **kwargs):
-        method = InstagramAPIMethod(api, *args, **kwargs)
+        method = StashAPIMethod(api, *args, **kwargs)
         return method.execute()
 
     return _call
