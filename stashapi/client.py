@@ -1,6 +1,6 @@
 from . import oauth2
 from .bind import bind_method
-from .models import Media, User, Location, Tag, Comment, Relationship
+from .models import StashObject, ApiModel
 
 MEDIA_ACCEPT_PARAMETERS = ["count", "max_id"]
 SEARCH_ACCEPT_PARAMETERS = ["q", "count"]
@@ -68,13 +68,15 @@ class StashAPI(oauth2.OAuth2API):
     list = bind_method(
                 path='/delta',
                 accept_parameters=['cursor', 'offset'],
-                objectify_response=False)
+                response_type='list',
+                root_class=StashObject)
 
     metadata = bind_method(
                 path='/metadata',
                 method='POST',
                 accepts_parameters=['stashid', 'folderid', 'list'],
-                objectify_response=False)
+                response_type='entry',
+                root_class=ApiModel)
 
     media = bind_method(
                 path='/media',

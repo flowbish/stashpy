@@ -3,6 +3,10 @@ from .helper import timestamp_to_datetime
 
 class ApiModel(object):
 
+    def __init__(self, *args, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     @classmethod
     def object_from_dictionary(cls, entry):
         # make dict keys all strings
@@ -10,8 +14,45 @@ class ApiModel(object):
         return cls(**entry_str_dict)
 
     def __repr__(self):
-        return unicode(self).encode('utf8')
+        return 'ApiModel()'
 
+class StashObject(ApiModel):
+    
+    def __init__(self, stashid, folderid, position, metadata):
+        self.stashid = stashid
+        self.folderid = folderid
+        self.position = position
+        self.is_folder = metadata['is_folder']
+        self.title = metadata['title']
+        self.artist_comments = metadata.get('artist_comments', '')
+        self.keywords = metadata.get('keywords', '')
+        self.original_url = metadata.get('original_url', '')
+        self.category = metadata.get('category', '')
+        self.files = metadata.get('files', dict())
+
+    @classmethod
+    def object_from_dictionary(cls, entry):
+        # make dict keys all strings
+        entry_str_dict = dict([(str(key), value) for key, value in entry.items()])
+        if 'stashid' in entry_str_dict:
+            return StashFile(**entry_str_dict)
+        else:
+            return StashFolder(**entry_str_dict)
+
+
+class StashFile(StashObject):
+    def __repr__(self):
+        return 'StashFile(stashid=%r)' % (self.stashid)
+
+class StashFolder(StashObject):
+
+    def __init__(self, *args, **kwargs):
+        kwargs.update({'stashid': None})
+        super().__init__(*args, **kwargs)
+        self.dir = []
+
+    def __repr__(self):
+        return 'StashFolder(folderid=%r)' % (self.folderid)
 
 class Image(ApiModel):
 

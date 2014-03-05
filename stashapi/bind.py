@@ -1,5 +1,5 @@
 from .oauth2 import OAuth2Request
-from .json_import import simplejson
+from .models import ApiModel
 import urllib
 import re
 
@@ -38,9 +38,9 @@ def bind_method(**config):
         accepts_parameters = config.get("accepts_parameters", [])
         requires_target_user = config.get('requires_target_user', False)
         paginates = config.get('paginates', False)
-        root_class = config.get('root_class', None)
+        root_class = config.get('root_class', ApiModel)
         accepts_file = config.get('accepts_file', False)
-        response_type = config.get("response_type", "list")
+        response_type = config.get("response_type", "empty")
         include_secret = config.get("include_secret", False)
         objectify_response = config.get("objectify_response", True)
 
@@ -111,16 +111,15 @@ def bind_method(**config):
                 if not self.objectify_response:
                     return content_obj, None
 
-                # TODO: this doesn't work at all
                 if self.response_type == 'list':
-                    for entry in content_obj['data']:
+                    for entry in content_obj['entries']:
                         if self.return_json:
                             api_responses.append(entry)
                         else:
                             obj = self.root_class.object_from_dictionary(entry)
                             api_responses.append(obj)
                 elif self.response_type == 'entry':
-                    data = content_obj['data']
+                    data = content_obj
                     if self.return_json:
                         api_responses = data
                     else:
